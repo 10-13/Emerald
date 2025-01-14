@@ -1,0 +1,14 @@
+[Name/set$MyTitle]
+
+[Tags/add$SomeTag1]
+[Tags/add$SomeTag2]
+
+[InnerSelector$regex_selector]
+ [InnerSelector/Expr/set$.*(?:\.jpg|\.jpeg|\.png)]
+
+[Sorter$default]
+
+[OuterSelector$default]
+
+[Namer$through]
+ [Namer/AddName/set]
