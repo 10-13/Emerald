@@ -1,8 +1,12 @@
+#pragma once
+#pragma GCC -std=c++20
+
 #include <iostream>
 #include <regex>
 #include <vector>
 #include <map>
 #include <set>
+#include <stack>
 #include <string>
 #include <fstream>
 #include <sstream>

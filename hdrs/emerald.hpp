@@ -1,4 +1,5 @@
 #pragma once
+#pragma GCC -std=c++20
 
 #include "echo.hpp"
 #include <string>
@@ -6,8 +7,9 @@
 #include <set>
 #include <filesystem>
 #include <string>
+#include <stack>
 
-namespace fs = std::filesystem;
+namespace fs = std::__fs::filesystem;
 
 struct Emerald {
     struct Storage;
@@ -33,7 +35,7 @@ struct TagChecker {
         std::vector<std::string>* row;
         int index;
 
-        const std::string& operator*() const {
+        std::string operator*() const {
             return row->at(index);
         }
 
@@ -59,11 +61,11 @@ struct TagChecker {
     }
 
     bool check_and(context& cnt) {
-        return check_val(++cnt) && check_val(++cnt);
+        return check_val(++cnt) && check_val(cnt);
     }
 
     bool check_or(context& cnt) {
-        return check_val(++cnt) || check_val(++cnt);
+        return check_val(++cnt) || check_val(cnt);
     }
 
     bool check_not(context& cnt) {
@@ -77,7 +79,7 @@ struct TagChecker {
 
     TagCheckerFunction checker;
 
-    std::vector<std::string> parse(std::string script) {
+    static std::vector<std::string> parse(std::string script) {
         std::vector<std::string> req;
         req.emplace_back("");
         for (auto i : script) {
@@ -158,7 +160,7 @@ private:
     static bool IsAttribute(const std::string& name, const std::string& tag) {
         if (tag.size() < name.size() + 1)
             return false;
-        
+
         if (tag[0] != AttributeSymbol)
             return false;
 
@@ -169,7 +171,7 @@ private:
 
         if (tag.size() == name.size() + 1)
             return true;
-            
+
         return tag[name.size() + 1] == AttributeValueSpacerSymbol;
     }
 
@@ -199,40 +201,40 @@ public:
         return fs::exists(path/UnitInitFile);
     }
 
-void init_mappings(echolang::echo_mapping* map) {
-    map->mappings["Name"] = echolang::echo_field{Name};
-    {
-        auto tag = echolang::echo_set_field{Tags};
-        tag.mappings["ContainsAttribute"] = echolang::echo_single_shot{echo_lambda(&) { 
-            return ContainsAttribute(row.value);
-        }};
-        map->mappings["Tags"] = tag;
+    void init_mappings(echolang::echo_mapping* map) {
+        map->mappings["Name"] = echolang::echo_field{Name};
+        {
+            auto tag = echolang::echo_set_field{Tags};
+            tag.mappings["ContainsAttribute"] = echolang::echo_single_shot{echo_lambda(&) { 
+                return ContainsAttribute(row.value);
+            }};
+            map->mappings["Tags"] = tag;
+        }
+        {
+            auto obj = echolang::echo_object<InnerSelector>{this->FInSelector};
+            for (auto& i : EmeraldInit<InnerSelector>::Inits)
+                obj.inits[i.first]=i.second;
+            map->mappings["InnerSelector"] = obj;
+        }
+        {
+            auto obj = echolang::echo_object<Sorter>{this->FSorter};
+            for (auto& i : EmeraldInit<Sorter>::Inits)
+                obj.inits[i.first]=i.second;
+            map->mappings["Sorter"] = obj;
+        }
+        {
+            auto obj = echolang::echo_object<OuterSelector>{this->FOutSelector};
+            for (auto& i : EmeraldInit<OuterSelector>::Inits)
+                obj.inits[i.first]=i.second;
+            map->mappings["OuterSelector"] = obj;
+        }
+        {
+            auto obj = echolang::echo_object<Namer>{this->FNamer};
+            for (auto& i : EmeraldInit<Namer>::Inits)
+                obj.inits[i.first]=i.second;
+            map->mappings["Namer"] = obj;
+        }
     }
-    {
-        auto obj = echolang::echo_object<InnerSelector>{this->FInSelector};
-        for (auto& i : EmeraldInit<InnerSelector>::Inits)
-            obj.inits[i.first]=i.second;
-        map->mappings["InnerSelector"] = obj;
-    }
-    {
-        auto obj = echolang::echo_object<Sorter>{this->FSorter};
-        for (auto& i : EmeraldInit<Sorter>::Inits)
-            obj.inits[i.first]=i.second;
-        map->mappings["Sorter"] = obj;
-    }
-    {
-        auto obj = echolang::echo_object<OuterSelector>{this->FOutSelector};
-        for (auto& i : EmeraldInit<OuterSelector>::Inits)
-            obj.inits[i.first]=i.second;
-        map->mappings["OuterSelector"] = obj;
-    }
-    {
-        auto obj = echolang::echo_object<Namer>{this->FNamer};
-        for (auto& i : EmeraldInit<Namer>::Inits)
-            obj.inits[i.first]=i.second;
-        map->mappings["Namer"] = obj;
-    }
-}
 
     static EmeraldUnit* CreateEmpty() {
         return new EmeraldUnit();
@@ -291,14 +293,13 @@ struct Emerald::Storage {
     }
 
     static void LoadUnit(std::string path) {
-        std::cout << "Loading unit:" << path << std::endl;
         if (EmeraldUnit::IsUnit(StashPath/path))
             Units.push_back(EmeraldUnit{StashPath/path});
     }
 
     static void ListTags() {
         std::map<std::string, size_t> tags;
-        
+
         for (auto unit : Units) {
             for (auto tag : unit.Tags) {
                 if (tag[0] != EmeraldUnit::AttributeSymbol)
@@ -400,52 +401,50 @@ struct Emerald::Compile {
             if(files * iterations/totalFiles > p) {
                 p = files * iterations/totalFiles;
                 std::cout << "\t" << p * 100 / iterations << "% Done\033[100D";
+                std::cout.flush();
             }
         }
     }
 
-static void CompileOutput() {
-    auto output_path = Emerald::Storage::StashPath/Output;
-    
-    EmeraldStatic::Init();
+    static void CompileOutput() {
+        auto output_path = Emerald::Storage::StashPath/Output;
 
-    size_t totalUnits = Targets.size();
-    size_t units = 0;
+        EmeraldStatic::Init();
 
-    std::cout << "Compiling " << Targets.size() << " targets" << std::endl;
+        size_t totalUnits = Targets.size();
+        size_t units = 0;
 
-    for (auto unit : Targets) {
-        std::cout << "Compiling: " << unit->Name;
-        std::cout << "\t" << (++units) * 100 / totalUnits << "% Done\033[100D";
+        std::cout << "Compiling " << Targets.size() << " targets" << std::endl;
 
-        unit->FInSelector->CompilationMsg(CompilationRound::SwapSource, *unit);
-        unit->FSorter->CompilationMsg(CompilationRound::SwapSource, *unit);
-        unit->FOutSelector->CompilationMsg(CompilationRound::SwapSource, *unit);
-        unit->FNamer->CompilationMsg(CompilationRound::SwapSource, *unit);
+        for (auto unit : Targets) {
+            std::cout << "\t" << (++units) * 100 / totalUnits << "% Done\033[100D";
+            std::cout.flush();
 
-        std::vector<fs::path> files;
+            unit->FInSelector->CompilationMsg(CompilationRound::SwapSource, *unit);
+            unit->FSorter->CompilationMsg(CompilationRound::SwapSource, *unit);
+            unit->FOutSelector->CompilationMsg(CompilationRound::SwapSource, *unit);
+            unit->FNamer->CompilationMsg(CompilationRound::SwapSource, *unit);
+            std::vector<fs::path> files;
+            for (auto file : fs::directory_iterator(Emerald::Storage::StashPath/unit->Path)) {
+                if (unit->FInSelector->Satisfies(file))
+                    files.push_back(file.path());
+            }
+            auto comp = [&unit](const fs::path& a, const fs::path& b) {
+                return unit->FSorter->PathLessCompare(a, b);
+            };
+            std::sort(files.begin(), files.end(), comp);
 
-        for (auto file : fs::directory_iterator(Emerald::Storage::StashPath/unit->Path)) {
-            if (unit->FInSelector->Satisfies(file))
-                files.push_back(file.path());
-        }
-        
-        auto comp = [&unit](const fs::path& a, const fs::path& b) {
-            return unit->FSorter->PathLessCompare(a, b);
-        };
-        std::sort(files.begin(), files.end(), comp);
+            for (int index = 0; index < files.size(); index++) {
+                if (unit->FOutSelector->Satisfies(files[index], index, *unit)) {
+                    auto name = unit->FNamer->MakeName(files[index], index, *unit);
 
-        for (int index = 0; index < files.size(); index++) {
-            if (unit->FOutSelector->Satisfies(files[index], index, *unit)) {
-                auto name = unit->FNamer->MakeName(files[index], index, *unit);
+                    auto destenation = output_path/name;
 
-                auto destenation = output_path/name;
-
-                fs::copy(files[index], destenation);
+                    fs::copy(files[index], destenation);
+                }
             }
         }
     }
-}
 
     static void SetupCompileMappings(echolang::echo_mapping* mapping) {
         mapping->mappings["CompileOutput"] = echolang::echo_bind_function(CompileOutput);
@@ -551,22 +550,63 @@ public:
 
 // TODO: Finish Taged outer selector 
 
-class OuterSelectTaged : public OuterSelector {
-public:
-    void CompilationMsg(CompilationRound round, const EmeraldUnit& reffered) {}
+class OuterSelectorTaged : public OuterSelector {
+private:
+    static bool IsInRange(int index, const std::pair<int, int>& range) {
+        return index >= range.first && index <= range.second;
+    }
 
-    void init_mappings(echolang::echo_mapping* map) {}
+    static bool IsCorrectPrefix(std::string& pref, const std::string& value) {
+        if (pref.size() > value.size())
+            return false;
 
-    bool Satisfies(fs::path file, int index, const EmeraldUnit& src) {
+        for (int i = 0; i < pref.size(); i++)
+            if (pref[i] != value[i])
+                return false;
+
         return true;
     }
 
-    static void TagRequest() {
+    bool CheckTag(std::string& tag, int index) {
+        for (auto i = Ranges.lower_bound(tag); i != Ranges.end() && IsCorrectPrefix(tag, i->first); i++)
+            if (IsInRange(index, i->second))
+                return true;
 
+        return false;
+    }
+
+    bool Check(std::string tag) {
+        return CheckTag(tag, Index);
+    }
+
+    int Index{0};
+    TagChecker Checker{[&](std::string r){return this->Check(r);}};
+    inline static std::vector<std::string> Request{};
+
+public:
+    std::map<std::string, std::pair<int, int>> Ranges;
+
+
+    void CompilationMsg(CompilationRound round, const EmeraldUnit& reffered) {}
+
+    void init_mappings(echolang::echo_mapping* map) {
+        map->mappings["Ranges"] = echolang::generic::create_echo_generic_map<std::pair<int, int>>(Ranges, echolang::generic::echo_generic_range_field{});
+    }
+
+    bool Satisfies(fs::path file, int index, const EmeraldUnit& src) {
+        Index = index;
+        return Checker.check(Request);
+    }
+
+    static void TagRequest() {
+        std::cout << "Input tag request for outer selector:\n";
+        std::string req;
+        std::getline(std::cin, req);
+        Request = TagChecker::parse(req);
     }
 
     static OuterSelector* CreateDefault() {
-        return new OuterSelectTaged{};
+        return new OuterSelectorTaged{};
     }
 };
 
@@ -590,7 +630,7 @@ public:
     static void UpdateIndexer() {
         Index_ = 0;
     }
-    
+
     static Namer* CreateDefault() {
         return new ThroughNamer();
     }
@@ -601,9 +641,11 @@ namespace {
     auto s1 = EmeraldInit<InnerSelector>("default", DefaultSelector::CreateDefault);
     auto s2 = EmeraldInit<Sorter>{"default", FilenameSorter::CreateDefault};
     auto s3 = EmeraldInit<OuterSelector>{"default", OuterSelectAll::CreateDefault};
-    auto s4 = EmeraldInit<Namer>{"through", ThroughNamer::CreateDefault};
+    auto s4 = EmeraldInit<OuterSelector>{"taged", OuterSelectorTaged::CreateDefault};
+    auto s5 = EmeraldInit<Namer>{"through", ThroughNamer::CreateDefault};
 
     auto k1 = EmeraldStatic{ThroughNamer::UpdateIndexer};
-    //auto k2 = EmeraldStatic{OuterSelectTaged::TagRequest};
+    auto k2 = EmeraldStatic{OuterSelectorTaged::TagRequest};
 }
+
 
